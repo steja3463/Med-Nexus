@@ -1,31 +1,43 @@
-const express = require('express');
-const connectToDb = require('./Config/connectToDb');
-const cors = require('cors');
-const authRoutes = require("./Routes/apis/authRoutes")
-const doctorRoutes = require("./Routes/apis/doctors/doctorsRoutes")
-const patientRoutes = require('./Routes/apis/patients/makeAppointment')
+const express = require("express");
+const http = require("http");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const connectToDb = require("./Config/connectToDb"); // Ensure correct path
+const authRoutes = require("./Routes/apis/authRoutes");
+const doctorRoutes = require("./Routes/apis/doctors/doctorsRoutes");
+const patientRoutes = require("./Routes/apis/patients/makeAppointment");
+const {
+  routes,
+  initializeWebSocketServer,
+} = require("./Routes/videoCallRoutes");
 
+require("dotenv").config();
+
+// Initialize Express app and HTTP server
 const app = express();
+const server = http.createServer(app);
 
-require('dotenv').config()
+// Initialize WebSocket server
+initializeWebSocketServer(server);
 
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// ✅ Call only `connectToDb()`, remove duplicate `mongoose.connect()`
 connectToDb();
 
-//Middlewares 
-app.use(express.json())
-app.get("/",(req,res) => {
-    console.log(req.body);
-})
-app.use(cors());
+// Routes
+app.get("/", (req, res) => {
+  res.send("Server is running...");
+});
+app.use("/", authRoutes);
+app.use("/", doctorRoutes);
+app.use("/", patientRoutes);
+app.use("/", routes); // Adding WebSocket routes
 
-
-//authenticationRoutes
-app.use("/",authRoutes);
-
-//doctorRoutes
-app.use("/",doctorRoutes)
-
-//patientRoutes
-app.use("/",patientRoutes)
-
-module.exports = app;
+// Start HTTP server
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
