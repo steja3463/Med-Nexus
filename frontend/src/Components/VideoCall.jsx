@@ -1,24 +1,31 @@
-import React, { useState, useEffect, useRef, useContext } from "react";
-import { useParams } from "react-router-dom";
+// VideoCall.jsx
+import React, { useEffect, useRef, useState, useContext } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import Peer from "simple-peer";
 import { Auth } from "../Contexts/AuthContext";
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 const VideoCall = () => {
   const { roomId } = useParams();
+  const navigate = useNavigate();
   const { user } = useContext(Auth);
+
+  const [stream, setStream] = useState(null);
+  const [receivingCall, setReceivingCall] = useState(false);
+  const [callerSignal, setCallerSignal] = useState();
+  const [callAccepted, setCallAccepted] = useState(false);
+  const [callEnded, setCallEnded] = useState(false);
   const [appointmentDetails, setAppointmentDetails] = useState(null);
   const [error, setError] = useState(null);
-  const [stream, setStream] = useState(null);
-  const myVideo = useRef(null);
-  const socketRef = useRef(null);
-  console.log(user);
+
+  const myVideo = useRef();
+  const userVideo = useRef();
+  const connectionRef = useRef();
+  const socketRef = useRef();
+
   useEffect(() => {
-    if (!user) {
-      setError("❌ User is not authenticated. Please log in.");
-      return;
-    }
-
-    console.log("📡 Fetching Appointment Details for:", roomId);
-
+    // Fetch appointment details
     const fetchAppointmentDetails = async () => {
       try {
         const response = await fetch(
@@ -33,71 +40,265 @@ const VideoCall = () => {
         );
 
         if (!response.ok) {
-          throw new Error(`❌ Failed to fetch appointment: ${response.status}`);
+          throw new Error("Failed to fetch appointment details");
         }
 
         const data = await response.json();
-        console.log("✅ Appointment Data:", data);
         setAppointmentDetails(data);
       } catch (err) {
         setError(err.message);
-        console.error("❌ API Error:", err);
       }
     };
 
     fetchAppointmentDetails();
-  }, [roomId, user]);
 
-  // ✅ Fix WebSocket Connection
-  useEffect(() => {
-    console.log("📡 Connecting WebSocket for room:", roomId);
-
-    socketRef.current = new WebSocket("ws://localhost:3000");
-
-    socketRef.current.onopen = () => {
-      console.log("✅ WebSocket Connected");
-      socketRef.current.send(JSON.stringify({ type: "join", roomId }));
-    };
-
-    socketRef.current.onclose = (event) => {
-      console.warn("❌ WebSocket Disconnected:", event.code, event.reason);
-    };
-
-    return () => {
-      console.log("♻ Cleaning up WebSocket...");
-      socketRef.current?.close();
-    };
-  }, [roomId]);
-
-  // ✅ Fix Video Stream Not Appearing
-  useEffect(() => {
+    // Get media stream
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
       .then((currentStream) => {
         setStream(currentStream);
-        console.log("🎥 Local Video Stream Obtained");
         if (myVideo.current) {
           myVideo.current.srcObject = currentStream;
         }
       })
       .catch((err) => {
-        setError("Camera or microphone access denied.");
-        console.error("❌ Failed to get media devices:", err);
+        setError(
+          "Camera or microphone access denied. Please allow access to use video calling."
+        );
+        console.error("Failed to get media devices:", err);
       });
-  }, []);
 
-  return (
-    <div>
-      <h1>Video Call Room: {roomId}</h1>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      <video
-        ref={myVideo}
-        autoPlay
-        playsInline
-        style={{ width: "400px", height: "300px", background: "black" }}
-      />
-    </div>
-  );
+    // Connect to signaling server using WebSocket
+    socketRef.current = new WebSocket(`ws://localhost:8000`);
+
+    socketRef.current.onopen = () => {
+      // Join the room
+      socketRef.current.send(
+        JSON.stringify({
+          type: "join",
+          roomId,
+        })
+      );
+    };
+
+    socketRef.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      switch (data.type) {
+        case "userJoined":
+          // Optionally, handle new users joining the room
+          break;
+        case "callUser":
+          setReceivingCall(true);
+          setCallerSignal(data.signal);
+          break;
+        case "callAccepted":
+          setCallAccepted(true);
+          connectionRef.current.signal(data.signal);
+          break;
+        case "callEnded":
+          handleCallEnd();
+          break;
+        case "doctorNotification":
+          // This notification is for the patient
+          toast.info(data.message || "Doctor has initiated the video call");
+          break;
+        default:
+          break;
+      }
+    };
+
+    return () => {
+      // Cleanup
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+      if (connectionRef.current) {
+        connectionRef.current.destroy();
+      }
+    };
+  }, [roomId, user, appointmentDetails]);
+
+  const callUser = () => {
+    const peer = new Peer({
+      initiator: true,
+      trickle: false,
+      stream: stream,
+    });
+
+    peer.on("signal", (data) => {
+      socketRef.current.send(
+        JSON.stringify({
+          type: "callUser",
+          roomId,
+          from: user, // or any identifier you want to send
+          signalData: data,
+        })
+      );
+    });
+
+    peer.on("stream", (remoteStream) => {
+      if (userVideo.current) {
+        userVideo.current.srcObject = remoteStream;
+      }
+    });
+
+    connectionRef.current = peer;
+  };
+
+  peer.on("signal", (data) => {
+    socketRef.current.send(
+      JSON.stringify({
+        type: "answerCall",
+        roomId,
+        signal: data, // <-- Send back signal to doctor
+      })
+    );
+  });
+
+  peer.on("signal", (data) => {
+    socketRef.current.send(
+      JSON.stringify({
+        type: "answerCall",
+        roomId,
+        signal: data,
+      })
+    );
+  });
+
+  peer.on("stream", (remoteStream) => {
+    if (userVideo.current) {
+      userVideo.current.srcObject = remoteStream;
+    }
+  });
+
+  peer.signal(callerSignal);
+  connectionRef.current = peer;
 };
+
+const handleCallEnd = () => {
+  setCallEnded(true);
+  if (connectionRef.current) {
+    connectionRef.current.destroy();
+  }
+  socketRef.current.send(
+    JSON.stringify({
+      type: "callEnded",
+      roomId,
+    })
+  );
+  setTimeout(() => {
+    navigate(-1);
+  }, 3000);
+};
+
+const endCall = () => {
+  socketRef.current.send(
+    JSON.stringify({
+      type: "endCall",
+      roomId,
+    })
+  );
+  handleCallEnd();
+};
+
+// For doctors: send notification to patient when the button is pressed and initiate call
+const notifyPatient = () => {
+  socketRef.current.send(
+    JSON.stringify({
+      type: "notifyPatient",
+      roomId,
+    })
+  );
+  callUser(); // <-- This now starts the call immediately after notifying the patient.
+};
+return (
+  <div className="flex flex-col h-screen bg-gray-100">
+    <ToastContainer />
+    <div className="bg-white p-4 shadow-md">
+      <h1 className="text-2xl font-bold">Video Consultation</h1>
+      {appointmentDetails && (
+        <p className="text-gray-600">
+          {appointmentDetails.isDoctor
+            ? `Patient: ${appointmentDetails.patientName}`
+            : `Doctor: ${appointmentDetails.doctorName}`}
+        </p>
+      )}
+    </div>
+
+    {error && (
+      <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded m-4">
+        <p>{error}</p>
+      </div>
+    )}
+
+    <div className="flex-1 flex flex-col md:flex-row p-4 gap-4">
+      <div className="flex-1 flex flex-col gap-4">
+        <div className="bg-black rounded-lg flex-1 flex items-center justify-center relative">
+          {callAccepted && !callEnded ? (
+            <video
+              ref={userVideo}
+              playsInline
+              autoPlay
+              className="w-full h-full object-cover rounded-lg"
+            />
+          ) : (
+            <div className="text-white text-center">
+              {receivingCall && !callAccepted ? (
+                <div>
+                  <p className="mb-4">Incoming call...</p>
+                  <button
+                    className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
+                    onClick={answerCall}
+                  >
+                    Answer Call
+                  </button>
+                </div>
+              ) : (
+                <p>
+                  {callEnded
+                    ? "Call ended"
+                    : "Waiting for the other participant..."}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-gray-800 rounded-lg h-32 md:h-40 lg:h-48 overflow-hidden">
+          {stream && (
+            <video
+              ref={myVideo}
+              muted
+              playsInline
+              autoPlay
+              className="w-full h-full object-cover"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+
+    <div className="bg-white p-4 shadow-md flex justify-center space-x-4">
+      <button
+        onClick={endCall}
+        className="bg-red-500 hover:bg-red-600 text-white p-3 rounded-full"
+      >
+        End Call
+      </button>
+      {appointmentDetails && appointmentDetails.isDoctor && !callAccepted && (
+        <button
+          onClick={notifyPatient}
+          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
+        >
+          Start Video Call
+        </button>
+      )}
+    </div>
+  </div>
+);
 
 export default VideoCall;
