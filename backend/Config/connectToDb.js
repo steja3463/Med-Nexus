@@ -8,7 +8,7 @@ const connectToDb = async () => {
     }
 
     await mongoose.connect(
-      process.env.MONGO_URI || "mongodb://localhost:27017/MED-NEXUS"
+      process.env.MONGO_URI || "mongodb://localhost:27017/test"
     );
 
     console.log("MongoDB connected successfully");
