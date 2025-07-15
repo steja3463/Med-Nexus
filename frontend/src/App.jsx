@@ -27,6 +27,7 @@ import ViewPrescription from "./Components/ViewPrescription";
 import AboutUs from "./Pages/AboutUs";
 import ContactUs from "./Pages/ContactUs";
 import VideoCall from "./Components/VideoCall";
+import ChatbotPlaceholder from "./Components/ChatbotPlaceholder";
 
 function App() {
   return (
@@ -88,6 +89,7 @@ function App() {
                       element={<ViewPrescription />}
                     />
                     <Route path="status" element={<ConfirmationStatus />} />
+                    <Route path="chatbot" element={<ChatbotPlaceholder />} />
                   </Route>
                   <Route path="doctor" element={<AdminLayout />}>
                     <Route index element={<DoctorDashboard />} />
