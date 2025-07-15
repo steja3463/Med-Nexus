@@ -182,6 +182,16 @@ const PatientDashboard = () => {
         <h1 className="text-3xl font-bold text-blue-600 mb-6">
           Patient Dashboard
         </h1>
+        <div className="mb-6 text-right">
+          <a
+            href="http://localhost:8081"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-lg transition-colors shadow-lg inline-block"
+          >
+            Ask Dr. AI (Chatbot)
+          </a>
+        </div>
 
         {/* Notifications Section */}
         <div className="bg-white rounded-lg shadow-md p-4 mb-6">
